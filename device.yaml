@@ -1,0 +1,102 @@
+config:
+  default_byte_order: LE
+  register_address_type: u8
+  defmt_feature: "defmt-1"
+
+INPUT:
+  type: register
+  access: RO
+  address: 0x00
+  size_bits: 16
+  fields:
+    value:
+      base: uint
+      start: 0
+      end: 16
+OUTPUT:
+  type: register
+  address: 0x02
+  size_bits: 16
+  fields:
+    value:
+      base: uint
+      start: 0
+      end: 16
+POLARITY_INVERSION:
+  type: register
+  address: 0x04
+  size_bits: 16
+  fields:
+    value:
+      base: uint
+      start: 0
+      end: 16
+CONFIGURATION:
+  type: register
+  address: 0x06
+  size_bits: 16
+  reset_value: 0xffff
+  fields:
+    value:
+      base: uint
+      start: 0
+      end: 16
+INPUT_LATCH:
+  type: register
+  address: 0x44
+  size_bits: 16
+  fields:
+    value:
+      base: uint
+      start: 0
+      end: 16
+PULL_UP_DOWN_ENABLE:
+  type: register
+  address: 0x46
+  size_bits: 16
+  fields:
+    value:
+      base: uint
+      start: 0
+      end: 16
+PULL_UP_DOWN_SELECTION:
+  type: register
+  address: 0x48
+  size_bits: 16
+  reset_value: 0xffff
+  fields:
+    value:
+      base: uint
+      start: 0
+      end: 16
+INTERRUPT_MASK:
+  type: register
+  address: 0x4A
+  size_bits: 16
+  reset_value: 0xffff
+  fields:
+    value:
+      base: uint
+      start: 0
+      end: 16
+INTERRUPT_STATUS:
+  type: register
+  access: RO
+  address: 0x4C
+  size_bits: 16
+  fields:
+    value:
+      base: uint
+      start: 0
+      end: 16
+OUTPUT_PORT_CONFIGURATION:
+  type: register
+  address: 0x4F
+  size_bits: 8
+  fields:
+    oden0:
+      base: bool
+      start: 0
+    oden1:
+      base: bool
+      start: 1

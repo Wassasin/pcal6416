@@ -1,0 +1,17 @@
+[package]
+name = "pcal6416"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+device-driver = { version = "1.0", default-features = false, features = ["yaml"] }
+embedded-hal = "1.0"
+embedded-hal-async = "1.0"
+
+embassy-sync = "0.6.2"
+
+num_enum = "0.7"
+defmt = { version = "1.0", optional = true }
+
+[features]
+defmt-1 = ["dep:defmt"]
