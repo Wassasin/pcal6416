@@ -12,13 +12,13 @@ use crate::*;
 type PcalMutex<T, M> = Mutex<M, ll::Device<ll::Interface<T>>>;
 type PcalReference<'a, T, M> = &'a PcalMutex<T, M>;
 
-type InterruptChannel = Channel<NoopRawMutex, bool, 1>;
-type InterruptReceiver<'a> = Receiver<'a, NoopRawMutex, bool, 1>;
-type InterruptSender<'a> = Sender<'a, NoopRawMutex, bool, 1>;
+type InterruptChannel<M> = Channel<M, bool, 1>;
+type InterruptReceiver<'a, M> = Receiver<'a, M, bool, 1>;
+type InterruptSender<'a, M> = Sender<'a, M, bool, 1>;
 
 pub struct Pcal6416<T, M: RawMutex = NoopRawMutex> {
     inner: PcalMutex<T, M>,
-    interrupt_channels: [InterruptChannel; 16],
+    interrupt_channels: [InterruptChannel<M>; 16],
 }
 
 pub struct Input<T>(PhantomData<T>);
@@ -34,7 +34,7 @@ pub trait PinMarker {
 
 pub struct Pin<'a, DIR, MARKER: PinMarker, T, M: RawMutex> {
     port_driver: PcalReference<'a, T, M>,
-    interrupt_receiver: InterruptReceiver<'a>,
+    interrupt_receiver: InterruptReceiver<'a, M>,
     _dir: PhantomData<DIR>,
     _marker: PhantomData<MARKER>,
 }
@@ -50,7 +50,7 @@ where
 {
     fn new(
         port_driver: PcalReference<'a, T, M>,
-        interrupt_receiver: InterruptReceiver<'a>,
+        interrupt_receiver: InterruptReceiver<'a, M>,
     ) -> Self {
         Self {
             port_driver,
@@ -339,7 +339,7 @@ where
 
 pub struct InterruptHandler<'a, T, M: RawMutex> {
     port_driver: PcalReference<'a, T, M>,
-    interrupt_channels: [InterruptSender<'a>; 16],
+    interrupt_channels: [InterruptSender<'a, M>; 16],
 }
 
 impl<T, M: RawMutex, E> InterruptHandler<'_, T, M>
