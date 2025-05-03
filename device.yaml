@@ -1,5 +1,5 @@
 config:
-  default_byte_order: LE
+  default_byte_order: BE
   register_address_type: u8
   defmt_feature: "defmt-1"
 
