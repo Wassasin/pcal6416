@@ -28,7 +28,7 @@ where
         buf[1..data.len() + 1].copy_from_slice(data);
         let buf = &buf[0..data.len() + 1];
 
-        self.i2c.write(self.address.addr(), &buf).await
+        self.i2c.write(self.address.addr(), buf).await
     }
 
     async fn read_register(

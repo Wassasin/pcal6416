@@ -250,7 +250,7 @@ where
     }
 }
 
-impl<'a, PULLUPDOWN, MARKER: PinMarker, T> Drop for InterruptPin<'a, PULLUPDOWN, MARKER, T> {
+impl<PULLUPDOWN, MARKER: PinMarker, T> Drop for InterruptPin<'_, PULLUPDOWN, MARKER, T> {
     fn drop(&mut self) {
         panic!("Please call deconfigure_interrupt before dropping this pin");
     }
@@ -265,8 +265,8 @@ impl<E: embedded_hal::i2c::Error> embedded_hal::digital::Error for DigitalError<
     }
 }
 
-impl<'a, PULLUPDOWN, MARKER: PinMarker, T, E> embedded_hal::digital::ErrorType
-    for InterruptPin<'a, PULLUPDOWN, MARKER, T>
+impl<PULLUPDOWN, MARKER: PinMarker, T, E> embedded_hal::digital::ErrorType
+    for InterruptPin<'_, PULLUPDOWN, MARKER, T>
 where
     T: I2c<Error = E>,
     E: embedded_hal::i2c::Error,
@@ -280,8 +280,8 @@ impl<E: embedded_hal::i2c::Error> From<E> for DigitalError<E> {
     }
 }
 
-impl<'a, PULLUPDOWN, MARKER: PinMarker, T, E> embedded_hal_async::digital::Wait
-    for InterruptPin<'a, PULLUPDOWN, MARKER, T>
+impl<PULLUPDOWN, MARKER: PinMarker, T, E> embedded_hal_async::digital::Wait
+    for InterruptPin<'_, PULLUPDOWN, MARKER, T>
 where
     T: I2c<Error = E>,
     E: embedded_hal::i2c::Error,
@@ -316,7 +316,7 @@ pub trait OutputPin {
     async fn set_value(&mut self, value: bool) -> Result<(), Self::Error>;
 }
 
-impl<'a, MARKER: PinMarker, T, E> OutputPin for Pin<'a, Output, MARKER, T>
+impl<MARKER: PinMarker, T, E> OutputPin for Pin<'_, Output, MARKER, T>
 where
     T: I2c<Error = E>,
 {
@@ -336,7 +336,7 @@ pub struct InterruptHandler<'a, T> {
     interrupt_channels: [InterruptSender<'a>; 16],
 }
 
-impl<'a, T, E> InterruptHandler<'a, T>
+impl<T, E> InterruptHandler<'_, T>
 where
     T: I2c<Error = E>,
 {
@@ -351,7 +351,10 @@ where
             let mask_be = idx_to_mask_be(idx);
             if status & mask_be != 0 {
                 let input = input & mask_be != 0;
-                if let Err(_) = self.interrupt_channels[idx as usize].try_send(input) {
+                if self.interrupt_channels[idx as usize]
+                    .try_send(input)
+                    .is_err()
+                {
                     #[cfg(feature = "defmt-1")]
                     defmt::debug!(
                         "Interrupt for {} could not be sent as they previous is still pending",
@@ -394,14 +397,13 @@ where
     T: I2c<Error = E>,
 {
     pub fn new(i2c: T, address: Address) -> Self {
-        const INTERRUPT_CHANNEL: InterruptChannel = InterruptChannel::new();
         Self {
             inner: Mutex::new(ll::Device::new(ll::Interface::new(i2c, address))),
-            interrupt_channels: [INTERRUPT_CHANNEL; 16],
+            interrupt_channels: [const { InterruptChannel::new() }; 16],
         }
     }
 
-    pub fn split<'a>(&'a mut self) -> Parts<'a, T> {
+    pub fn split(&mut self) -> Parts<'_, T> {
         macro_rules! instance_pin {
             ( $name:ident ) => {
                 Pin::new(
