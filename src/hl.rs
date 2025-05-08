@@ -28,15 +28,11 @@ pub struct PullUp;
 pub struct PullDown;
 pub struct Floating;
 
-pub trait PinMarker {
-    fn pin_idx() -> u8;
-}
-
-pub struct Pin<'a, DIR, MARKER: PinMarker, T, M: RawMutex> {
+pub struct Pin<'a, DIR, T, M: RawMutex> {
     port_driver: PcalReference<'a, T, M>,
     interrupt_receiver: InterruptReceiver<'a, M>,
+    idx: u8,
     _dir: PhantomData<DIR>,
-    _marker: PhantomData<MARKER>,
 }
 
 fn idx_to_mask_be(idx: u16) -> u16 {
@@ -44,24 +40,25 @@ fn idx_to_mask_be(idx: u16) -> u16 {
     (1u16 << idx).rotate_left(8)
 }
 
-impl<'a, DIR, MARKER: PinMarker, T, M: RawMutex, E> Pin<'a, DIR, MARKER, T, M>
+impl<'a, DIR, T, M: RawMutex, E> Pin<'a, DIR, T, M>
 where
     T: I2c<Error = E>,
 {
     fn new(
         port_driver: PcalReference<'a, T, M>,
         interrupt_receiver: InterruptReceiver<'a, M>,
+        idx: u8,
     ) -> Self {
         Self {
             port_driver,
             interrupt_receiver,
-            _dir: Default::default(),
-            _marker: Default::default(),
+            idx,
+            _dir: PhantomData,
         }
     }
 
     fn mask_be(&self) -> u16 {
-        idx_to_mask_be(MARKER::pin_idx() as u16)
+        idx_to_mask_be(self.idx as u16)
     }
 
     fn set_bit(&self, value: u16, bit: bool) -> u16 {
@@ -69,7 +66,17 @@ where
         value & !self.mask_be() | value_mask
     }
 
-    pub async fn into_input(self) -> Result<Pin<'a, Input<Floating>, MARKER, T, M>, E> {
+    /// Transform the current pin into one with a different direction.
+    fn transform<NEWDIR>(self) -> Pin<'a, NEWDIR, T, M> {
+        Pin {
+            port_driver: self.port_driver,
+            interrupt_receiver: self.interrupt_receiver,
+            idx: self.idx,
+            _dir: PhantomData,
+        }
+    }
+
+    pub async fn into_input(self) -> Result<Pin<'a, Input<Floating>, T, M>, E> {
         let mut pcal = self.port_driver.lock().await;
 
         // Set to floating.
@@ -82,15 +89,10 @@ where
             .modify_async(|r| r.set_value(self.set_bit(r.value(), true)))
             .await?;
 
-        Ok(Pin {
-            port_driver: self.port_driver,
-            interrupt_receiver: self.interrupt_receiver,
-            _dir: Default::default(),
-            _marker: self._marker,
-        })
+        Ok(self.transform())
     }
 
-    pub async fn into_output(self, value: bool) -> Result<Pin<'a, Output, MARKER, T, M>, E> {
+    pub async fn into_output(self, value: bool) -> Result<Pin<'a, Output, T, M>, E> {
         let mut pcal = self.port_driver.lock().await;
 
         // Set the output value before configuring it as an output
@@ -105,16 +107,11 @@ where
             .modify_async(|r| r.set_value(self.set_bit(r.value(), false)))
             .await?;
 
-        Ok(Pin {
-            port_driver: self.port_driver,
-            interrupt_receiver: self.interrupt_receiver,
-            _dir: Default::default(),
-            _marker: self._marker,
-        })
+        Ok(self.transform())
     }
 }
 
-impl<'a, PULLUPDOWN, MARKER: PinMarker, T, M: RawMutex, E> Pin<'a, Input<PULLUPDOWN>, MARKER, T, M>
+impl<'a, PULLUPDOWN, T, M: RawMutex, E> Pin<'a, Input<PULLUPDOWN>, T, M>
 where
     T: I2c<Error = E>,
 {
@@ -135,7 +132,7 @@ where
         Ok(!self.is_high().await?)
     }
 
-    pub async fn into_pull_up(self) -> Result<Pin<'a, Input<PullUp>, MARKER, T, M>, E> {
+    pub async fn into_pull_up(self) -> Result<Pin<'a, Input<PullUp>, T, M>, E> {
         let mut pcal = self.port_driver.lock().await;
 
         pcal.pull_up_down_selection()
@@ -146,15 +143,10 @@ where
             .modify_async(|r| r.set_value(self.set_bit(r.value(), true)))
             .await?;
 
-        Ok(Pin {
-            port_driver: self.port_driver,
-            interrupt_receiver: self.interrupt_receiver,
-            _dir: Default::default(),
-            _marker: self._marker,
-        })
+        Ok(self.transform())
     }
 
-    pub async fn into_pull_down(self) -> Result<Pin<'a, Input<PullDown>, MARKER, T, M>, E> {
+    pub async fn into_pull_down(self) -> Result<Pin<'a, Input<PullDown>, T, M>, E> {
         let mut pcal = self.port_driver.lock().await;
 
         pcal.pull_up_down_selection()
@@ -165,27 +157,17 @@ where
             .modify_async(|r| r.set_value(self.set_bit(r.value(), true)))
             .await?;
 
-        Ok(Pin {
-            port_driver: self.port_driver,
-            interrupt_receiver: self.interrupt_receiver,
-            _dir: Default::default(),
-            _marker: self._marker,
-        })
+        Ok(self.transform())
     }
 
-    pub async fn into_pull_floating(self) -> Result<Pin<'a, Input<Floating>, MARKER, T, M>, E> {
+    pub async fn into_pull_floating(self) -> Result<Pin<'a, Input<Floating>, T, M>, E> {
         let mut pcal = self.port_driver.lock().await;
 
         pcal.pull_up_down_enable()
             .modify_async(|r| r.set_value(self.set_bit(r.value(), false)))
             .await?;
 
-        Ok(Pin {
-            port_driver: self.port_driver,
-            interrupt_receiver: self.interrupt_receiver,
-            _dir: Default::default(),
-            _marker: self._marker,
-        })
+        Ok(self.transform())
     }
 
     async fn configure_interrupt(&mut self, enabled: bool) -> Result<(), E> {
@@ -201,7 +183,7 @@ where
         Ok(())
     }
 
-    pub async fn into_interrupt(mut self) -> Result<InterruptPin<'a, PULLUPDOWN, MARKER, T, M>, E> {
+    pub async fn into_interrupt(mut self) -> Result<InterruptPin<'a, PULLUPDOWN, T, M>, E> {
         self.configure_interrupt(true).await?;
         Ok(InterruptPin::new(self))
     }
@@ -230,22 +212,19 @@ where
     }
 }
 
-pub struct InterruptPin<'a, PULLUPDOWN, MARKER: PinMarker, T, M: RawMutex>(
-    ManuallyDrop<Pin<'a, Input<PULLUPDOWN>, MARKER, T, M>>,
+pub struct InterruptPin<'a, PULLUPDOWN, T, M: RawMutex>(
+    ManuallyDrop<Pin<'a, Input<PULLUPDOWN>, T, M>>,
 );
 
-impl<'a, PULLUPDOWN, MARKER: PinMarker, T, M: RawMutex, E>
-    InterruptPin<'a, PULLUPDOWN, MARKER, T, M>
+impl<'a, PULLUPDOWN, T, M: RawMutex, E> InterruptPin<'a, PULLUPDOWN, T, M>
 where
     T: I2c<Error = E>,
 {
-    fn new(pin: Pin<'a, Input<PULLUPDOWN>, MARKER, T, M>) -> Self {
+    fn new(pin: Pin<'a, Input<PULLUPDOWN>, T, M>) -> Self {
         Self(ManuallyDrop::new(pin))
     }
 
-    pub async fn deconfigure_interrupt(
-        mut self,
-    ) -> Result<Pin<'a, Input<PULLUPDOWN>, MARKER, T, M>, E> {
+    pub async fn deconfigure_interrupt(mut self) -> Result<Pin<'a, Input<PULLUPDOWN>, T, M>, E> {
         self.0.configure_interrupt(false).await?;
         // Deconstruct `self` into the inner pin without calling drop on `self`.
         let pin = unsafe { ManuallyDrop::take(&mut self.0) };
@@ -254,9 +233,7 @@ where
     }
 }
 
-impl<PULLUPDOWN, MARKER: PinMarker, T, M: RawMutex> Drop
-    for InterruptPin<'_, PULLUPDOWN, MARKER, T, M>
-{
+impl<PULLUPDOWN, T, M: RawMutex> Drop for InterruptPin<'_, PULLUPDOWN, T, M> {
     fn drop(&mut self) {
         panic!("Please call deconfigure_interrupt before dropping this pin");
     }
@@ -271,8 +248,8 @@ impl<E: embedded_hal::i2c::Error> embedded_hal::digital::Error for DigitalError<
     }
 }
 
-impl<PULLUPDOWN, MARKER: PinMarker, T, M: RawMutex, E> embedded_hal::digital::ErrorType
-    for InterruptPin<'_, PULLUPDOWN, MARKER, T, M>
+impl<PULLUPDOWN, T, M: RawMutex, E> embedded_hal::digital::ErrorType
+    for InterruptPin<'_, PULLUPDOWN, T, M>
 where
     T: I2c<Error = E>,
     E: embedded_hal::i2c::Error,
@@ -286,8 +263,8 @@ impl<E: embedded_hal::i2c::Error> From<E> for DigitalError<E> {
     }
 }
 
-impl<PULLUPDOWN, MARKER: PinMarker, T, M: RawMutex, E> embedded_hal_async::digital::Wait
-    for InterruptPin<'_, PULLUPDOWN, MARKER, T, M>
+impl<PULLUPDOWN, T, M: RawMutex, E> embedded_hal_async::digital::Wait
+    for InterruptPin<'_, PULLUPDOWN, T, M>
 where
     T: I2c<Error = E>,
     E: embedded_hal::i2c::Error,
@@ -322,7 +299,7 @@ pub trait OutputPin {
     async fn set_value(&mut self, value: bool) -> Result<(), Self::Error>;
 }
 
-impl<MARKER: PinMarker, T, M: RawMutex, E> OutputPin for Pin<'_, Output, MARKER, T, M>
+impl<T, M: RawMutex, E> OutputPin for Pin<'_, Output, T, M>
 where
     T: I2c<Error = E>,
 {
@@ -375,22 +352,22 @@ where
 }
 
 pub struct Pins<'a, T, M: RawMutex> {
-    pub p0_0: Pin<'a, Input<Floating>, P0_0, T, M>,
-    pub p0_1: Pin<'a, Input<Floating>, P0_1, T, M>,
-    pub p0_2: Pin<'a, Input<Floating>, P0_2, T, M>,
-    pub p0_3: Pin<'a, Input<Floating>, P0_3, T, M>,
-    pub p0_4: Pin<'a, Input<Floating>, P0_4, T, M>,
-    pub p0_5: Pin<'a, Input<Floating>, P0_5, T, M>,
-    pub p0_6: Pin<'a, Input<Floating>, P0_6, T, M>,
-    pub p0_7: Pin<'a, Input<Floating>, P0_7, T, M>,
-    pub p1_0: Pin<'a, Input<Floating>, P1_0, T, M>,
-    pub p1_1: Pin<'a, Input<Floating>, P1_1, T, M>,
-    pub p1_2: Pin<'a, Input<Floating>, P1_2, T, M>,
-    pub p1_3: Pin<'a, Input<Floating>, P1_3, T, M>,
-    pub p1_4: Pin<'a, Input<Floating>, P1_4, T, M>,
-    pub p1_5: Pin<'a, Input<Floating>, P1_5, T, M>,
-    pub p1_6: Pin<'a, Input<Floating>, P1_6, T, M>,
-    pub p1_7: Pin<'a, Input<Floating>, P1_7, T, M>,
+    pub p0_0: Pin<'a, Input<Floating>, T, M>,
+    pub p0_1: Pin<'a, Input<Floating>, T, M>,
+    pub p0_2: Pin<'a, Input<Floating>, T, M>,
+    pub p0_3: Pin<'a, Input<Floating>, T, M>,
+    pub p0_4: Pin<'a, Input<Floating>, T, M>,
+    pub p0_5: Pin<'a, Input<Floating>, T, M>,
+    pub p0_6: Pin<'a, Input<Floating>, T, M>,
+    pub p0_7: Pin<'a, Input<Floating>, T, M>,
+    pub p1_0: Pin<'a, Input<Floating>, T, M>,
+    pub p1_1: Pin<'a, Input<Floating>, T, M>,
+    pub p1_2: Pin<'a, Input<Floating>, T, M>,
+    pub p1_3: Pin<'a, Input<Floating>, T, M>,
+    pub p1_4: Pin<'a, Input<Floating>, T, M>,
+    pub p1_5: Pin<'a, Input<Floating>, T, M>,
+    pub p1_6: Pin<'a, Input<Floating>, T, M>,
+    pub p1_7: Pin<'a, Input<Floating>, T, M>,
 }
 
 pub struct Parts<'a, T, M: RawMutex> {
@@ -411,32 +388,33 @@ where
 
     pub fn split(&mut self) -> Parts<'_, T, M> {
         macro_rules! instance_pin {
-            ( $name:ident ) => {
+            ( $idx:expr ) => {
                 Pin::new(
                     &self.inner,
-                    self.interrupt_channels[$name::pin_idx() as usize].receiver(),
+                    self.interrupt_channels[$idx as usize].receiver(),
+                    $idx,
                 )
             };
         }
 
         Parts {
             pins: Pins {
-                p0_0: instance_pin!(P0_0),
-                p0_1: instance_pin!(P0_1),
-                p0_2: instance_pin!(P0_2),
-                p0_3: instance_pin!(P0_3),
-                p0_4: instance_pin!(P0_4),
-                p0_5: instance_pin!(P0_5),
-                p0_6: instance_pin!(P0_6),
-                p0_7: instance_pin!(P0_7),
-                p1_0: instance_pin!(P1_0),
-                p1_1: instance_pin!(P1_1),
-                p1_2: instance_pin!(P1_2),
-                p1_3: instance_pin!(P1_3),
-                p1_4: instance_pin!(P1_4),
-                p1_5: instance_pin!(P1_5),
-                p1_6: instance_pin!(P1_6),
-                p1_7: instance_pin!(P1_7),
+                p0_0: instance_pin!(0),
+                p0_1: instance_pin!(1),
+                p0_2: instance_pin!(2),
+                p0_3: instance_pin!(3),
+                p0_4: instance_pin!(4),
+                p0_5: instance_pin!(5),
+                p0_6: instance_pin!(6),
+                p0_7: instance_pin!(7),
+                p1_0: instance_pin!(8),
+                p1_1: instance_pin!(9),
+                p1_2: instance_pin!(10),
+                p1_3: instance_pin!(11),
+                p1_4: instance_pin!(12),
+                p1_5: instance_pin!(13),
+                p1_6: instance_pin!(14),
+                p1_7: instance_pin!(15),
             },
             interrupt_handler: InterruptHandler {
                 port_driver: &self.inner,
@@ -445,32 +423,3 @@ where
         }
     }
 }
-
-macro_rules! define_pin {
-    ( $name:ident, $idx:literal ) => {
-        pub struct $name;
-
-        impl PinMarker for $name {
-            fn pin_idx() -> u8 {
-                $idx
-            }
-        }
-    };
-}
-
-define_pin!(P0_0, 0);
-define_pin!(P0_1, 1);
-define_pin!(P0_2, 2);
-define_pin!(P0_3, 3);
-define_pin!(P0_4, 4);
-define_pin!(P0_5, 5);
-define_pin!(P0_6, 6);
-define_pin!(P0_7, 7);
-define_pin!(P1_0, 8);
-define_pin!(P1_1, 9);
-define_pin!(P1_2, 10);
-define_pin!(P1_3, 11);
-define_pin!(P1_4, 12);
-define_pin!(P1_5, 13);
-define_pin!(P1_6, 14);
-define_pin!(P1_7, 15);
