@@ -18,3 +18,17 @@ impl Address {
         }
     }
 }
+
+trait SealedMode {}
+
+#[allow(private_bounds)]
+pub trait Mode: SealedMode {}
+
+pub struct Async;
+pub struct Blocking;
+
+impl SealedMode for Async {}
+impl SealedMode for Blocking {}
+
+impl Mode for Async {}
+impl Mode for Blocking {}

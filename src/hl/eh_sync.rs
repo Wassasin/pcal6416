@@ -1,61 +1,56 @@
 use embassy_sync::blocking_mutex::raw::RawMutex;
-use embedded_hal_async::i2c::I2c;
+use embedded_hal::i2c::I2c;
 
 use super::*;
 
-impl<'a, DIR, T, M: RawMutex, E> Pin<'a, DIR, T, M, Async>
+impl<'a, DIR, T, M: RawMutex, E> Pin<'a, DIR, T, M, Blocking>
 where
     T: I2c<Error = E>,
 {
-    pub async fn into_input(self) -> Result<Pin<'a, Input<Floating>, T, M, Async>, E> {
+    pub async fn into_input(self) -> Result<Pin<'a, Input<Floating>, T, M, Blocking>, E> {
         let mut pcal = self.port_driver.lock().await;
 
         // Set to floating.
         pcal.pull_up_down_enable()
-            .modify_async(|r| r.set_value(self.set_bit(r.value(), false)))
-            .await?;
+            .modify(|r| r.set_value(self.set_bit(r.value(), false)))?;
 
         pcal.borrow_mut()
             .configuration()
-            .modify_async(|r| r.set_value(self.set_bit(r.value(), true)))
-            .await?;
+            .modify(|r| r.set_value(self.set_bit(r.value(), true)))?;
 
         Ok(self.transform())
     }
 
-    pub async fn into_output(self, value: bool) -> Result<Pin<'a, Output, T, M, Async>, E> {
+    pub async fn into_output(self, value: bool) -> Result<Pin<'a, Output, T, M, Blocking>, E> {
         let mut pcal = self.port_driver.lock().await;
 
         // Set the output value before configuring it as an output
 
         pcal.borrow_mut()
             .output()
-            .modify_async(|r| r.set_value(self.set_bit(r.value(), value)))
-            .await?;
+            .modify(|r| r.set_value(self.set_bit(r.value(), value)))?;
 
         pcal.borrow_mut()
             .configuration()
-            .modify_async(|r| r.set_value(self.set_bit(r.value(), false)))
-            .await?;
+            .modify(|r| r.set_value(self.set_bit(r.value(), false)))?;
 
         Ok(self.transform())
     }
 }
 
-impl<'a, PULLUPDOWN, T, M: RawMutex, E> Pin<'a, Input<PULLUPDOWN>, T, M, Async>
+impl<'a, PULLUPDOWN, T, M: RawMutex, E> Pin<'a, Input<PULLUPDOWN>, T, M, Blocking>
 where
     T: I2c<Error = E>,
 {
     pub async fn set_input_latch(&mut self, value: bool) -> Result<(), E> {
         let mut pcal = self.port_driver.lock().await;
         pcal.input_latch()
-            .modify_async(|r| r.set_value(self.set_bit(r.value(), value)))
-            .await
+            .modify(|r| r.set_value(self.set_bit(r.value(), value)))
     }
 
     pub async fn is_high(&mut self) -> Result<bool, E> {
         let mut pcal = self.port_driver.lock().await;
-        let value = pcal.input().read_async().await?;
+        let value = pcal.input().read()?;
         Ok(value.value() & self.mask_be() != 0)
     }
 
@@ -63,40 +58,35 @@ where
         Ok(!self.is_high().await?)
     }
 
-    pub async fn into_pull_up(self) -> Result<Pin<'a, Input<PullUp>, T, M, Async>, E> {
+    pub async fn into_pull_up(self) -> Result<Pin<'a, Input<PullUp>, T, M, Blocking>, E> {
         let mut pcal = self.port_driver.lock().await;
 
         pcal.pull_up_down_selection()
-            .modify_async(|r| r.set_value(self.set_bit(r.value(), true)))
-            .await?;
+            .modify(|r| r.set_value(self.set_bit(r.value(), true)))?;
 
         pcal.pull_up_down_enable()
-            .modify_async(|r| r.set_value(self.set_bit(r.value(), true)))
-            .await?;
+            .modify(|r| r.set_value(self.set_bit(r.value(), true)))?;
 
         Ok(self.transform())
     }
 
-    pub async fn into_pull_down(self) -> Result<Pin<'a, Input<PullDown>, T, M, Async>, E> {
+    pub async fn into_pull_down(self) -> Result<Pin<'a, Input<PullDown>, T, M, Blocking>, E> {
         let mut pcal = self.port_driver.lock().await;
 
         pcal.pull_up_down_selection()
-            .modify_async(|r| r.set_value(self.set_bit(r.value(), false)))
-            .await?;
+            .modify(|r| r.set_value(self.set_bit(r.value(), false)))?;
 
         pcal.pull_up_down_enable()
-            .modify_async(|r| r.set_value(self.set_bit(r.value(), true)))
-            .await?;
+            .modify(|r| r.set_value(self.set_bit(r.value(), true)))?;
 
         Ok(self.transform())
     }
 
-    pub async fn into_pull_floating(self) -> Result<Pin<'a, Input<Floating>, T, M, Async>, E> {
+    pub async fn into_pull_floating(self) -> Result<Pin<'a, Input<Floating>, T, M, Blocking>, E> {
         let mut pcal = self.port_driver.lock().await;
 
         pcal.pull_up_down_enable()
-            .modify_async(|r| r.set_value(self.set_bit(r.value(), false)))
-            .await?;
+            .modify(|r| r.set_value(self.set_bit(r.value(), false)))?;
 
         Ok(self.transform())
     }
@@ -104,17 +94,17 @@ where
     async fn configure_interrupt(&mut self, enabled: bool) -> Result<(), E> {
         let mut pcal = self.port_driver.lock().await;
         pcal.input_latch()
-            .modify_async(|r| r.set_value(self.set_bit(r.value(), enabled)))
-            .await?;
+            .modify(|r| r.set_value(self.set_bit(r.value(), enabled)))?;
         // A mask is negative, hence invert enabled.
         pcal.interrupt_mask()
-            .modify_async(|r| r.set_value(self.set_bit(r.value(), !enabled)))
-            .await?;
+            .modify(|r| r.set_value(self.set_bit(r.value(), !enabled)))?;
 
         Ok(())
     }
 
-    pub async fn into_interrupt(mut self) -> Result<InterruptPin<'a, PULLUPDOWN, T, M, Async>, E> {
+    pub async fn into_interrupt(
+        mut self,
+    ) -> Result<InterruptPin<'a, PULLUPDOWN, T, M, Blocking>, E> {
         self.configure_interrupt(true).await?;
         Ok(InterruptPin::new(self))
     }
@@ -143,13 +133,13 @@ where
     }
 }
 
-impl<'a, PULLUPDOWN, T, M: RawMutex, E> InterruptPin<'a, PULLUPDOWN, T, M, Async>
+impl<'a, PULLUPDOWN, T, M: RawMutex, E> InterruptPin<'a, PULLUPDOWN, T, M, Blocking>
 where
     T: I2c<Error = E>,
 {
     pub async fn deconfigure_interrupt(
         mut self,
-    ) -> Result<Pin<'a, Input<PULLUPDOWN>, T, M, Async>, E> {
+    ) -> Result<Pin<'a, Input<PULLUPDOWN>, T, M, Blocking>, E> {
         self.0.configure_interrupt(false).await?;
         // Deconstruct `self` into the inner pin without calling drop on `self`.
         let pin = unsafe { ManuallyDrop::take(&mut self.0) };
@@ -159,7 +149,7 @@ where
 }
 
 impl<PULLUPDOWN, T, M: RawMutex, E> embedded_hal::digital::ErrorType
-    for InterruptPin<'_, PULLUPDOWN, T, M, Async>
+    for InterruptPin<'_, PULLUPDOWN, T, M, Blocking>
 where
     T: I2c<Error = E>,
     E: embedded_hal::i2c::Error,
@@ -168,7 +158,7 @@ where
 }
 
 impl<PULLUPDOWN, T, M: RawMutex, E> embedded_hal_async::digital::Wait
-    for InterruptPin<'_, PULLUPDOWN, T, M, Async>
+    for InterruptPin<'_, PULLUPDOWN, T, M, Blocking>
 where
     T: I2c<Error = E>,
     E: embedded_hal::i2c::Error,
@@ -196,7 +186,7 @@ where
     }
 }
 
-impl<T, M: RawMutex, E> OutputPin for Pin<'_, Output, T, M, Async>
+impl<T, M: RawMutex, E> OutputPin for Pin<'_, Output, T, M, Blocking>
 where
     T: I2c<Error = E>,
 {
@@ -206,21 +196,20 @@ where
         let mut pcal = self.port_driver.lock().await;
 
         pcal.output()
-            .modify_async(|r| r.set_value(self.set_bit(r.value(), value)))
-            .await
+            .modify(|r| r.set_value(self.set_bit(r.value(), value)))
     }
 }
 
-impl<T, M: RawMutex, E> InterruptHandler<'_, T, M, Async>
+impl<T, M: RawMutex, E> InterruptHandler<'_, T, M, Blocking>
 where
     T: I2c<Error = E>,
 {
     pub async fn handle(&mut self) -> Result<(), E> {
         let mut pcal = self.port_driver.lock().await;
 
-        let status = pcal.interrupt_status().read_async().await?.value();
+        let status = pcal.interrupt_status().read()?.value();
         // Clears interrupts
-        let input = pcal.input().read_async().await?.value();
+        let input = pcal.input().read()?.value();
 
         for idx in 0..16u16 {
             let mask_be = idx_to_mask_be(idx);

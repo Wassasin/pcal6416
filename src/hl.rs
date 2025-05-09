@@ -1,4 +1,5 @@
 mod eh_async;
+mod eh_sync;
 
 use core::{borrow::BorrowMut, marker::PhantomData, mem::ManuallyDrop};
 
@@ -17,9 +18,10 @@ type InterruptChannel<M> = Channel<M, bool, 1>;
 type InterruptReceiver<'a, M> = Receiver<'a, M, bool, 1>;
 type InterruptSender<'a, M> = Sender<'a, M, bool, 1>;
 
-pub struct Pcal6416<T, M: RawMutex = NoopRawMutex> {
+pub struct Pcal6416<T, M: RawMutex = NoopRawMutex, MODE: Mode = Async> {
     inner: PcalMutex<T, M>,
     interrupt_channels: [InterruptChannel<M>; 16],
+    _mode: PhantomData<MODE>,
 }
 
 pub struct Input<T>(PhantomData<T>);
@@ -29,11 +31,12 @@ pub struct PullUp;
 pub struct PullDown;
 pub struct Floating;
 
-pub struct Pin<'a, DIR, T, M: RawMutex> {
+pub struct Pin<'a, DIR, T, M: RawMutex, MODE: Mode> {
     port_driver: PcalReference<'a, T, M>,
     interrupt_receiver: InterruptReceiver<'a, M>,
     idx: u8,
     _dir: PhantomData<DIR>,
+    _mode: PhantomData<MODE>,
 }
 
 fn idx_to_mask_be(idx: u16) -> u16 {
@@ -41,7 +44,7 @@ fn idx_to_mask_be(idx: u16) -> u16 {
     (1u16 << idx).rotate_left(8)
 }
 
-impl<'a, DIR, T, M: RawMutex> Pin<'a, DIR, T, M> {
+impl<'a, DIR, T, M: RawMutex, MODE: Mode> Pin<'a, DIR, T, M, MODE> {
     fn new(
         port_driver: PcalReference<'a, T, M>,
         interrupt_receiver: InterruptReceiver<'a, M>,
@@ -52,6 +55,7 @@ impl<'a, DIR, T, M: RawMutex> Pin<'a, DIR, T, M> {
             interrupt_receiver,
             idx,
             _dir: PhantomData,
+            _mode: PhantomData,
         }
     }
 
@@ -65,27 +69,28 @@ impl<'a, DIR, T, M: RawMutex> Pin<'a, DIR, T, M> {
     }
 
     /// Transform the current pin into one with a different direction.
-    fn transform<NEWDIR>(self) -> Pin<'a, NEWDIR, T, M> {
+    fn transform<NEWDIR>(self) -> Pin<'a, NEWDIR, T, M, MODE> {
         Pin {
             port_driver: self.port_driver,
             interrupt_receiver: self.interrupt_receiver,
             idx: self.idx,
             _dir: PhantomData,
+            _mode: PhantomData,
         }
     }
 }
 
-pub struct InterruptPin<'a, PULLUPDOWN, T, M: RawMutex>(
-    ManuallyDrop<Pin<'a, Input<PULLUPDOWN>, T, M>>,
+pub struct InterruptPin<'a, PULLUPDOWN, T, M: RawMutex, MODE: Mode>(
+    ManuallyDrop<Pin<'a, Input<PULLUPDOWN>, T, M, MODE>>,
 );
 
-impl<'a, PULLUPDOWN, T, M: RawMutex> InterruptPin<'a, PULLUPDOWN, T, M> {
-    fn new(pin: Pin<'a, Input<PULLUPDOWN>, T, M>) -> Self {
+impl<'a, PULLUPDOWN, T, M: RawMutex, MODE: Mode> InterruptPin<'a, PULLUPDOWN, T, M, MODE> {
+    fn new(pin: Pin<'a, Input<PULLUPDOWN>, T, M, MODE>) -> Self {
         Self(ManuallyDrop::new(pin))
     }
 }
 
-impl<PULLUPDOWN, T, M: RawMutex> Drop for InterruptPin<'_, PULLUPDOWN, T, M> {
+impl<PULLUPDOWN, T, M: RawMutex, MODE: Mode> Drop for InterruptPin<'_, PULLUPDOWN, T, M, MODE> {
     fn drop(&mut self) {
         panic!("Please call deconfigure_interrupt before dropping this pin");
     }
@@ -113,44 +118,58 @@ pub trait OutputPin {
     async fn set_value(&mut self, value: bool) -> Result<(), Self::Error>;
 }
 
-pub struct InterruptHandler<'a, T, M: RawMutex> {
+pub struct InterruptHandler<'a, T, M: RawMutex, MODE: Mode> {
     port_driver: PcalReference<'a, T, M>,
     interrupt_channels: [InterruptSender<'a, M>; 16],
+    _mode: PhantomData<MODE>,
 }
 
-pub struct Pins<'a, T, M: RawMutex> {
-    pub p0_0: Pin<'a, Input<Floating>, T, M>,
-    pub p0_1: Pin<'a, Input<Floating>, T, M>,
-    pub p0_2: Pin<'a, Input<Floating>, T, M>,
-    pub p0_3: Pin<'a, Input<Floating>, T, M>,
-    pub p0_4: Pin<'a, Input<Floating>, T, M>,
-    pub p0_5: Pin<'a, Input<Floating>, T, M>,
-    pub p0_6: Pin<'a, Input<Floating>, T, M>,
-    pub p0_7: Pin<'a, Input<Floating>, T, M>,
-    pub p1_0: Pin<'a, Input<Floating>, T, M>,
-    pub p1_1: Pin<'a, Input<Floating>, T, M>,
-    pub p1_2: Pin<'a, Input<Floating>, T, M>,
-    pub p1_3: Pin<'a, Input<Floating>, T, M>,
-    pub p1_4: Pin<'a, Input<Floating>, T, M>,
-    pub p1_5: Pin<'a, Input<Floating>, T, M>,
-    pub p1_6: Pin<'a, Input<Floating>, T, M>,
-    pub p1_7: Pin<'a, Input<Floating>, T, M>,
+pub struct Pins<'a, T, M: RawMutex, MODE: Mode> {
+    pub p0_0: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p0_1: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p0_2: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p0_3: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p0_4: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p0_5: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p0_6: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p0_7: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p1_0: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p1_1: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p1_2: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p1_3: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p1_4: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p1_5: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p1_6: Pin<'a, Input<Floating>, T, M, MODE>,
+    pub p1_7: Pin<'a, Input<Floating>, T, M, MODE>,
 }
 
-pub struct Parts<'a, T, M: RawMutex> {
-    pub pins: Pins<'a, T, M>,
-    pub interrupt_handler: InterruptHandler<'a, T, M>,
+pub struct Parts<'a, T, M: RawMutex, MODE: Mode> {
+    pub pins: Pins<'a, T, M, MODE>,
+    pub interrupt_handler: InterruptHandler<'a, T, M, MODE>,
 }
 
-impl<T, M: RawMutex> Pcal6416<T, M> {
-    pub fn new(i2c: T, address: Address) -> Self {
+impl<T, M: RawMutex> Pcal6416<T, M, Blocking> {
+    pub fn new_blocking(i2c: T, address: Address) -> Self {
         Self {
             inner: Mutex::new(ll::Device::new(ll::Interface::new(i2c, address))),
             interrupt_channels: [const { InterruptChannel::new() }; 16],
+            _mode: PhantomData,
         }
     }
+}
 
-    pub fn split(&mut self) -> Parts<'_, T, M> {
+impl<T, M: RawMutex> Pcal6416<T, M, Async> {
+    pub fn new_async(i2c: T, address: Address) -> Self {
+        Self {
+            inner: Mutex::new(ll::Device::new(ll::Interface::new(i2c, address))),
+            interrupt_channels: [const { InterruptChannel::new() }; 16],
+            _mode: PhantomData,
+        }
+    }
+}
+
+impl<T, M: RawMutex, MODE: Mode> Pcal6416<T, M, MODE> {
+    pub fn split(&mut self) -> Parts<'_, T, M, MODE> {
         macro_rules! instance_pin {
             ( $idx:expr ) => {
                 Pin::new(
@@ -183,6 +202,7 @@ impl<T, M: RawMutex> Pcal6416<T, M> {
             interrupt_handler: InterruptHandler {
                 port_driver: &self.inner,
                 interrupt_channels: self.interrupt_channels.each_ref().map(|c| c.sender()),
+                _mode: PhantomData,
             },
         }
     }
